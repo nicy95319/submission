@@ -1,180 +1,94 @@
-from fastapi import FastAPI, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from enum import Enum
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import List
 
-# 引入你寫好的資料庫連線與模型
-from database import get_db
+from database import engine, get_db
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.templating import Jinja2Templates
 import models
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+# 自動檢查並在 PostgreSQL 中建立對應的表格
+models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="投稿審查系統 API")
 
-# ==================== 1. 列舉型態定義 (Enum) ====================
-class UserRole(str, Enum):
-    AUTHOR = "author"
-    EDITOR = "editor"
-
-class SubmissionStatus(str, Enum):
-    DRAFT = "編輯中"
-    REVIEWING = "審查中"
-    APPROVED = "已通過"
-
-class ReviewAction(str, Enum):
-    APPROVE = "approve"  # 通過
-    REJECT = "reject"    # 退回修改
+# 設定 Jinja2 模板資料夾 (對應 templates/index.html)
+templates = Jinja2Templates(directory="templates")
 
 
-# ==================== 2. Pydantic 請求/回應資料驗證模型 ====================
+# ==========================================
+# Pydantic Schemas (資料驗證模型)
+# ==========================================
 class SubmissionCreate(BaseModel):
-    category: str
     title: str
+    category: str
+    content: str
+    author_id: int = 1
+
+
+class ReviewRequest(BaseModel):
+    status: str  # 通過 或 退回
+
+
+class SubmissionResponse(BaseModel):
+    id: int
+    title: str
+    category: str
     content: str
     author_id: int
+    status: str
 
-class SubmissionUpdate(BaseModel):
-    category: Optional[str] = None
-    title: Optional[str] = None
-    content: Optional[str] = None
+    class Config:
+        from_attributes = True
 
 
-# ==================== 3. 作者端 API ====================
+# ==========================================
+# 前端網頁路由
+# ==========================================
+@app.get("/")
+def read_root(request: Request):
+    """回傳前端 HTML 畫面 (templates/index.html)"""
+    return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/api/author/submissions", summary="查看投稿稿件清單")
-def get_author_submissions(author_id: int, db: Session = Depends(get_db)):
-    """
-    回傳該作者的所有稿件清單 (類別、標題、審查狀態)
-    """
-    submissions = db.query(models.SubmissionModel).filter(models.SubmissionModel.author_id == author_id).all()
-    return submissions
 
-@app.post("/api/submissions", status_code=201, summary="新增投稿")
-def create_submission(data: SubmissionCreate, db: Session = Depends(get_db)):
-    """
-    建立新稿件，狀態預設為「編輯中」
-    """
-    new_sub = models.SubmissionModel(
-        author_id=data.author_id,
-        category=data.category,
-        title=data.title,
-        content=data.content,
-        status=SubmissionStatus.DRAFT  # 預設為編輯中
+# ==========================================
+# 後端 API 路由
+# ==========================================
+
+# 1. 新增投稿 (POST)
+@app.post("/api/submissions", response_model=SubmissionResponse, status_code=201)
+def create_submission(sub: SubmissionCreate, db: Session = Depends(get_db)):
+    new_sub = models.Submission(
+        title=sub.title,
+        category=sub.category,
+        content=sub.content,
+        author_id=sub.author_id,
+        status="審查中"
     )
     db.add(new_sub)
     db.commit()
     db.refresh(new_sub)
-    return {"message": "新增投稿成功", "submission": new_sub}
+    return new_sub
 
-@app.put("/api/submissions/{sub_id}", summary="編輯投稿")
-def update_submission(sub_id: int, data: SubmissionUpdate, author_id: int, db: Session = Depends(get_db)):
-    """
-    編輯投稿：僅限狀態為「編輯中」的稿件才能修改
-    """
-    sub = db.query(models.SubmissionModel).filter(models.SubmissionModel.id == sub_id).first()
+
+# 2. 取得所有投稿清單 (GET)
+@app.get("/api/author/submissions", response_model=List[SubmissionResponse])
+def get_author_submissions(db: Session = Depends(get_db)):
+    submissions = db.query(models.Submission).all()
+    return submissions
+
+
+# 3. 編輯/審查投稿狀態 (PATCH)
+@app.patch("/api/editor/submissions/{sub_id}/review", response_model=SubmissionResponse)
+def review_submission(sub_id: int, review: ReviewRequest, db: Session = Depends(get_db)):
+    sub = db.query(models.Submission).filter(models.Submission.id == sub_id).first()
     if not sub:
-        raise HTTPException(status_code=404, detail="找不到此稿件")
-    
-    if sub.author_id != author_id:
-        raise HTTPException(status_code=403, detail="您沒有權限修改此稿件")
-    
-    # 檢查狀態是否為「編輯中」
-    if sub.status != SubmissionStatus.DRAFT:
-        raise HTTPException(status_code=400, detail="只能修改狀態為「編輯中」的稿件")
-    
-    if data.category is not None:
-        sub.category = data.category
-    if data.title is not None:
-        sub.title = data.title
-    if data.content is not None:
-        sub.content = data.content
-        
+        raise HTTPException(status_code=404, detail="找不到該筆投稿")
+
+    if review.status not in ["通過", "退回"]:
+        raise HTTPException(status_code=400, detail="審查狀態只能為 '通過' 或 '退回'")
+
+    sub.status = review.status
     db.commit()
     db.refresh(sub)
-    return {"message": "更新成功", "submission": sub}
-
-@app.delete("/api/submissions/{sub_id}", summary="刪除稿件")
-def delete_submission(sub_id: int, author_id: int, db: Session = Depends(get_db)):
-    """
-    刪除稿件：僅限狀態為「編輯中」才能刪除
-    """
-    sub = db.query(models.SubmissionModel).filter(models.SubmissionModel.id == sub_id).first()
-    if not sub:
-        raise HTTPException(status_code=404, detail="找不到此稿件")
-        
-    if sub.author_id != author_id:
-        raise HTTPException(status_code=403, detail="您沒有權限刪除此稿件")
-        
-    if sub.status != SubmissionStatus.DRAFT:
-        raise HTTPException(status_code=400, detail="只能刪除狀態為「編輯中」的稿件")
-        
-    db.delete(sub)
-    db.commit()
-    return {"message": "刪除成功"}
-
-@app.patch("/api/submissions/{sub_id}/submit", summary="送出投稿")
-def submit_for_review(sub_id: int, author_id: int, db: Session = Depends(get_db)):
-    """
-    送出投稿：將狀態從「編輯中」改為「審查中」
-    """
-    sub = db.query(models.SubmissionModel).filter(models.SubmissionModel.id == sub_id).first()
-    if not sub:
-        raise HTTPException(status_code=404, detail="找不到此稿件")
-        
-    if sub.author_id != author_id:
-        raise HTTPException(status_code=403, detail="您沒有權限送出此稿件")
-        
-    if sub.status != SubmissionStatus.DRAFT:
-        raise HTTPException(status_code=400, detail="只有「編輯中」的稿件才能送出審查")
-        
-    sub.status = SubmissionStatus.REVIEWING
-    db.commit()
-    db.refresh(sub)
-    return {"message": "已成功送出審查", "submission": sub}
-
-
-# ==================== 4. 編輯端 API ====================
-
-@app.get("/api/editor/pending", summary="查看待審查清單")
-def get_pending_submissions(db: Session = Depends(get_db)):
-    """
-    回傳所有狀態為「審查中」的清單 (顯示作者、類別、標題)
-    """
-    pending_subs = db.query(models.SubmissionModel).filter(models.SubmissionModel.status == SubmissionStatus.REVIEWING).all()
-    return pending_subs
-
-@app.get("/api/editor/submissions/{sub_id}", summary="查看稿件詳細內容")
-def get_submission_detail(sub_id: int, db: Session = Depends(get_db)):
-    """
-    回傳特定稿件的詳細內容供編輯閱讀
-    """
-    sub = db.query(models.SubmissionModel).filter(models.SubmissionModel.id == sub_id).first()
-    if not sub:
-        raise HTTPException(status_code=404, detail="找不到此稿件")
     return sub
-
-@app.patch("/api/editor/submissions/{sub_id}/review", summary="審查操作(通過或退回)")
-def review_submission(sub_id: int, action: ReviewAction, db: Session = Depends(get_db)):
-    """
-    審查操作：
-    - approve -> 狀態改為「已通過」 (審查中 => 已通過)
-    - reject -> 狀態改為「編輯中」 (審查中 => 編輯中，讓作者修改)
-    """
-    sub = db.query(models.SubmissionModel).filter(models.SubmissionModel.id == sub_id).first()
-    if not sub:
-        raise HTTPException(status_code=404, detail="找不到此稿件")
-        
-    if sub.status != SubmissionStatus.REVIEWING:
-        raise HTTPException(status_code=400, detail="此稿件目前不在審查中狀態")
-        
-    if action == ReviewAction.APPROVE:
-        sub.status = SubmissionStatus.APPROVED
-        message = "審查通過"
-    elif action == ReviewAction.REJECT:
-        sub.status = SubmissionStatus.DRAFT
-        message = "已退回給作者修改"
-    else:
-        raise HTTPException(status_code=400, detail="無效的操作指令")
-        
-    db.commit()
-    db.refresh(sub)
-    return {"message": message, "submission": sub}

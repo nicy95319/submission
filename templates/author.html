@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>作者專區 — 投稿審查系統</title>
+    <style>
+        body { background-color: #f7f5f0; font-family: "Noto Serif TC", serif; color: #4a453e; padding: 40px; margin: 0; }
+        .container { max-width: 680px; margin: auto; background: #fffdf9; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(163, 153, 140, 0.1); border: 1px solid #e6e2d6; margin-bottom: 30px; }
+        h2 { font-weight: 400; letter-spacing: 1px; border-bottom: 1px solid #eef0eb; padding-bottom: 10px; color: #5c5346; }
+        label { font-size: 14px; color: #7d7365; }
+        input, textarea { width: 100%; padding: 10px; margin: 6px 0 16px 0; border: 1px solid #dcd6c8; border-radius: 6px; background: #faf9f5; box-sizing: border-box; font-family: inherit; }
+        button { background: #766e61; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; letter-spacing: 1px; }
+        button:hover { background: #5c5346; }
+        .item { border-bottom: 1px dashed #e2ded4; padding: 15px 0; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; max-width: 680px; margin: auto; }
+        .back-btn { background: transparent; color: #7d7365; border: 1px solid #dcd6c8; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 13px; }
+        .tag { font-size: 12px; background: #ede8dc; padding: 2px 8px; border-radius: 4px; color: #6e6558; }
+    </style>
+</head>
+<body>
+<div class="top-bar">
+    <span>✨ 作者專區：靈感與文字的聚落</span>
+    <a href="/" class="back-btn">登出 / 返回登入</a>
+</div>
+
+<div class="container">
+    <h2>發布新投稿</h2>
+    <label>文章標題</label>
+    <input type="text" id="title" placeholder="給作品一個名字...">
+    <label>文章分類</label>
+    <input type="text" id="category" placeholder="例如：散文 / 詩作 / 評論">
+    <label>文章內容</label>
+    <textarea id="content" rows="5" placeholder="寫下你的思緒..."></textarea>
+    <button onclick="submitSubmission()">送出投稿</button>
+</div>
+
+<div class="container">
+    <h2>我的投稿紀錄</h2>
+    <div id="submission-list" style="color: #8c8275;">載入中...</div>
+</div>
+
+<script>
+async function submitSubmission() {
+    const title = document.getElementById('title').value;
+    const category = document.getElementById('category').value;
+    const content = document.getElementById('content').value;
+
+    const res = await fetch('/api/submissions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, category, content })
+    });
+
+    if (res.ok) {
+        alert('投稿已送出，等待編輯審查。');
+        document.getElementById('title').value = '';
+        document.getElementById('category').value = '';
+        document.getElementById('content').value = '';
+        loadSubmissions();
+    } else {
+        alert('投稿失敗');
+    }
+}
+
+async function loadSubmissions() {
+    const res = await fetch('/api/submissions');
+    const data = await res.json();
+    const listDiv = document.getElementById('submission-list');
+    
+    if (data.length === 0) {
+        listDiv.innerHTML = '<p>目前沒有任何投稿紀錄。</p>';
+        return;
+    }
+
+    listDiv.innerHTML = data.map(item => `
+        <div class="item">
+            <strong>${item.title}</strong> <span class="tag">${item.category}</span>
+            <div style="font-size: 13px; margin-top: 4px; color: #9c9285;">狀態：<b>${item.status}</b></div>
+            <p style="margin: 8px 0 0 0; color: #665c52;">${item.content}</p>
+        </div>
+    `).join('');
+}
+loadSubmissions();
+</script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>投稿審查系統 — 登入</title>
+    <style>
+        body { background-color: #f7f5f0; font-family: "Noto Serif TC", serif; color: #4a453e; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: #fffdf9; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(163, 153, 140, 0.1); width: 320px; border: 1px solid #e6e2d6; }
+        h2 { text-align: center; font-weight: 400; letter-spacing: 2px; margin-bottom: 25px; color: #5c5346; }
+        label { font-size: 14px; color: #7d7365; }
+        input { width: 100%; padding: 10px; margin: 8px 0 20px 0; border: 1px solid #dcd6c8; border-radius: 6px; background: #faf9f5; box-sizing: border-box; font-family: inherit; }
+        button { width: 100%; background: #766e61; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; letter-spacing: 1px; transition: background 0.3s; }
+        button:hover { background: #5c5346; }
+        .hint { font-size: 12px; text-align: center; color: #9e9587; margin-top: 15px; line-height: 1.6; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h2>葉 A 冊 審 查</h2>
+    <label>帳號</label>
+    <input type="text" id="username" placeholder="請輸入帳號 (作者/編輯)">
+    <label>密碼</label>
+    <input type="password" id="password" placeholder="請輸入密碼">
+    <button onclick="handleLogin()">進入系統</button>
+    <div class="hint">
+        💡 預設帳號：<br>
+        作者：<b>作者小澄</b> (密碼 123)<br>
+        編輯：<b>主編森活</b> (密碼 123)
+    </div>
+</div>
+<script>
+async function handleLogin() {
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    });
+    if (res.ok) {
+        const data = await res.json();
+        if (data.role === 'author') {
+            window.location.href = '/author';
+        } else {
+            window.location.href = '/editor';
+        }
+    } else {
+        alert('登入失敗，請檢查帳號密碼');
+    }
+}
+</script>
+</body>
+</html>

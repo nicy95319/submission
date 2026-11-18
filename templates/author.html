@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -10,18 +9,24 @@
         h2 { font-weight: 400; letter-spacing: 1px; border-bottom: 1px solid #eef0eb; padding-bottom: 10px; color: #5c5346; }
         label { font-size: 14px; color: #7d7365; }
         input, textarea { width: 100%; padding: 10px; margin: 6px 0 16px 0; border: 1px solid #dcd6c8; border-radius: 6px; background: #faf9f5; box-sizing: border-box; font-family: inherit; }
-        button { background: #766e61; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; letter-spacing: 1px; }
+        button { background: #766e61; color: white; border: none; padding: 8px 14px; border-radius: 6px; cursor: pointer; letter-spacing: 1px; margin-right: 5px; }
         button:hover { background: #5c5346; }
+        .btn-submit { background: #6b7a67; }
+        .btn-delete { background: #9c6b63; }
         .item { border-bottom: 1px dashed #e2ded4; padding: 15px 0; }
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; max-width: 680px; margin: auto; }
         .back-btn { background: transparent; color: #7d7365; border: 1px solid #dcd6c8; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 13px; }
         .tag { font-size: 12px; background: #ede8dc; padding: 2px 8px; border-radius: 4px; color: #6e6558; }
+        .status-tag { font-size: 12px; padding: 2px 8px; border-radius: 4px; font-weight: bold; }
+        .status-editing { background: #e6e2d6; color: #5c5346; }
+        .status-reviewing { background: #dfd8c8; color: #7a6e5d; }
+        .status-approved { background: #d4ebd0; color: #3d6338; }
     </style>
 </head>
 <body>
 <div class="top-bar">
-    <span>✨ 作者專區：靈感與文字的聚落</span>
-    <a href="/" class="back-btn">登出 / 返回登入</a>
+    <span id="welcome-text">✨作者專區</span>
+    <a href="/" onclick="localStorage.clear()" class="back-btn">登出 / 返回登入</a>
 </div>
 
 <div class="container">
@@ -32,7 +37,7 @@
     <input type="text" id="category" placeholder="例如：散文 / 詩作 / 評論">
     <label>文章內容</label>
     <textarea id="content" rows="5" placeholder="寫下你的思緒..."></textarea>
-    <button onclick="submitSubmission()">送出投稿</button>
+    <button onclick="submitNew()">建立新投稿</button>
 </div>
 
 <div class="container">
@@ -41,30 +46,14 @@
 </div>
 
 <script>
-async function submitSubmission() {
-    const title = document.getElementById('title').value;
-    const category = document.getElementById('category').value;
-    const content = document.getElementById('content').value;
-
-    const res = await fetch('/api/submissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, category, content })
-    });
-
-    if (res.ok) {
-        alert('投稿已送出，等待編輯審查。');
-        document.getElementById('title').value = '';
-        document.getElementById('category').value = '';
-        document.getElementById('content').value = '';
-        loadSubmissions();
-    } else {
-        alert('投稿失敗');
-    }
+const userId = localStorage.getItem('user_id');
+const username = localStorage.getItem('username');
+if (username) {
+    document.getElementById('welcome-text').innerText = `✨ 作者專區：${username}`;
 }
 
 async function loadSubmissions() {
-    const res = await fetch('/api/submissions');
+    const res = await fetch(`/api/submissions?author_id=${userId}`);
     const data = await res.json();
     const listDiv = document.getElementById('submission-list');
     
@@ -73,102 +62,112 @@ async function loadSubmissions() {
         return;
     }
 
-    listDiv.innerHTML = data.map(item => `
-        <div class="item">
-            <strong>${item.title}</strong> <span class="tag">${item.category}</span>
-            <div style="font-size: 13px; margin-top: 4px; color: #9c9285;">狀態：<b>${item.status}</b></div>
-            <p style="margin: 8px 0 0 0; color: #665c52;">${item.content}</p>
+    listDiv.innerHTML = data.map(item => {
+        // 只有「編輯中」的狀態才能修改、刪除、送出審查
+        const isEditable = item.status === "編輯中";
+        
+        // 根據狀態給不同的標籤樣式
+        let statusClass = "status-editing";
+        if (item.status === "審查中") statusClass = "status-reviewing";
+        if (item.status === "已通過") statusClass = "status-approved";
+        
+        return `
+        <div class="item" id="sub-${item.id}">
+            ${isEditable ? `
+                <input type="text" id="title-${item.id}" value="${item.title}" style="margin-bottom:6px;">
+                <input type="text" id="cat-${item.id}" value="${item.category}" style="margin-bottom:6px;">
+                <textarea id="content-${item.id}" rows="3" style="margin-bottom:6px;">${item.content}</textarea>
+            ` : `
+                <strong>${item.title}</strong> <span class="tag">${item.category}</span>
+                <p style="margin: 8px 0; color: #665c52;">${item.content}</p>
+            `}
+            
+            <div style="font-size: 13px; margin-top: 6px; color: #9c9285;">
+                狀態：<span class="status-tag ${statusClass}">${item.status}</span>
+                ${item.status === '已通過' ? ' 🎉 恭喜您的稿件已通過審查！' : ''}
+            </div>
+            
+            <div style="margin-top: 10px;">
+                ${isEditable ? `
+                    <button onclick="updateSub(${item.id})">儲存修改</button>
+                    <button class="btn-submit" onclick="submitForReview(${item.id})">送出審查</button>
+                    <button class="btn-delete" onclick="deleteSub(${item.id})">刪除</button>
+                ` : `
+                    <span style="font-size: 12px; color: #aaa;">(${item.status === '已通過' ? '已通過審查，無法修改' : '審查中，無法修改'})</span>
+                `}
+            </div>
         </div>
-    `).join('');
+    `;}).join('');
 }
-loadSubmissions();
-</script>
-</body>
-=======
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <title>作者專區 — 投稿審查系統</title>
-    <style>
-        body { background-color: #f7f5f0; font-family: "Noto Serif TC", serif; color: #4a453e; padding: 40px; margin: 0; }
-        .container { max-width: 680px; margin: auto; background: #fffdf9; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(163, 153, 140, 0.1); border: 1px solid #e6e2d6; margin-bottom: 30px; }
-        h2 { font-weight: 400; letter-spacing: 1px; border-bottom: 1px solid #eef0eb; padding-bottom: 10px; color: #5c5346; }
-        label { font-size: 14px; color: #7d7365; }
-        input, textarea { width: 100%; padding: 10px; margin: 6px 0 16px 0; border: 1px solid #dcd6c8; border-radius: 6px; background: #faf9f5; box-sizing: border-box; font-family: inherit; }
-        button { background: #766e61; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; letter-spacing: 1px; }
-        button:hover { background: #5c5346; }
-        .item { border-bottom: 1px dashed #e2ded4; padding: 15px 0; }
-        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; max-width: 680px; margin: auto; }
-        .back-btn { background: transparent; color: #7d7365; border: 1px solid #dcd6c8; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 13px; }
-        .tag { font-size: 12px; background: #ede8dc; padding: 2px 8px; border-radius: 4px; color: #6e6558; }
-    </style>
-</head>
-<body>
-<div class="top-bar">
-    <span>✨ 作者專區：靈感與文字的聚落</span>
-    <a href="/" class="back-btn">登出 / 返回登入</a>
-</div>
 
-<div class="container">
-    <h2>發布新投稿</h2>
-    <label>文章標題</label>
-    <input type="text" id="title" placeholder="給作品一個名字...">
-    <label>文章分類</label>
-    <input type="text" id="category" placeholder="例如：散文 / 詩作 / 評論">
-    <label>文章內容</label>
-    <textarea id="content" rows="5" placeholder="寫下你的思緒..."></textarea>
-    <button onclick="submitSubmission()">送出投稿</button>
-</div>
-
-<div class="container">
-    <h2>我的投稿紀錄</h2>
-    <div id="submission-list" style="color: #8c8275;">載入中...</div>
-</div>
-
-<script>
-async function submitSubmission() {
+async function submitNew() {
     const title = document.getElementById('title').value;
     const category = document.getElementById('category').value;
     const content = document.getElementById('content').value;
 
+    if(!title || !category || !content) {
+        alert('請填寫完整的文章標題、分類與內容！');
+        return;
+    }
+
     const res = await fetch('/api/submissions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, category, content })
+        body: JSON.stringify({ title, category, content, author_id: parseInt(userId) })
     });
 
     if (res.ok) {
-        alert('投稿已送出，等待編輯審查。');
+        alert('已建立新稿件（狀態：編輯中）。');
         document.getElementById('title').value = '';
         document.getElementById('category').value = '';
         document.getElementById('content').value = '';
         loadSubmissions();
     } else {
-        alert('投稿失敗');
+        alert('建立失敗');
     }
 }
 
-async function loadSubmissions() {
-    const res = await fetch('/api/submissions');
-    const data = await res.json();
-    const listDiv = document.getElementById('submission-list');
-    
-    if (data.length === 0) {
-        listDiv.innerHTML = '<p>目前沒有任何投稿紀錄。</p>';
-        return;
-    }
+async function updateSub(id) {
+    const title = document.getElementById(`title-${id}`).value;
+    const category = document.getElementById(`cat-${id}`).value;
+    const content = document.getElementById(`content-${id}`).value;
 
-    listDiv.innerHTML = data.map(item => `
-        <div class="item">
-            <strong>${item.title}</strong> <span class="tag">${item.category}</span>
-            <div style="font-size: 13px; margin-top: 4px; color: #9c9285;">狀態：<b>${item.status}</b></div>
-            <p style="margin: 8px 0 0 0; color: #665c52;">${item.content}</p>
-        </div>
-    `).join('');
+    const res = await fetch(`/api/submissions/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, category, content })
+    });
+
+    if (res.ok) {
+        alert('修改已儲存！');
+        loadSubmissions();
+    } else {
+        alert('修改失敗');
+    }
 }
+
+async function submitForReview(id) {
+    const res = await fetch(`/api/submissions/${id}/submit`, { method: 'PUT' });
+    if (res.ok) {
+        alert('稿件已送出審查！');
+        loadSubmissions();
+    } else {
+        alert('送出失敗');
+    }
+}
+
+async function deleteSub(id) {
+    if (!confirm('確定要刪除這篇稿件嗎？')) return;
+    const res = await fetch(`/api/submissions/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+        alert('已刪除稿件');
+        loadSubmissions();
+    } else {
+        alert('刪除失敗');
+    }
+}
+
 loadSubmissions();
 </script>
 </body>
->>>>>>> be88a119ce8e4ff0c83de91db2331c0359056666
 </html>
